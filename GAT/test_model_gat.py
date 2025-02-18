@@ -7,11 +7,8 @@ from torch_geometric.data import Data
 from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
 from tensorflow.keras import layers, Model
-import logging
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import joblib  # Add this import
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class GAT(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_heads):
@@ -94,23 +91,11 @@ class ILGR:
         )
         return self.model
 
-    def train(self, X, y, epochs=1000, batch_size=8):
-        """Trains the regression model using the entire dataset."""
-        X = self.scaler.fit_transform(X)
-        self.model.fit(X, y, epochs=epochs, batch_size=batch_size)
-
     def predict(self, X):
         """Predicts criticality scores for a given set of embeddings."""
         X = self.scaler.transform(X)
         predictions = self.model.predict(X).flatten()
         return np.clip(predictions, 0.0, 1.0)  # Ensure predictions are in [0, 1]
-
-    def save_model(self, model_path, scaler_path):
-        """Saves the trained model and scaler to files."""
-        self.model.save(model_path)
-        joblib.dump(self.scaler, scaler_path)
-        print(f"Model saved to {model_path}")
-        print(f"Scaler saved to {scaler_path}")
 
     def load_model(self, model_path, scaler_path):
         """Loads a trained model and scaler from files."""
@@ -128,45 +113,46 @@ def compute_criticality_scores(graph, metric='degree'):
         scores = np.zeros(len(graph.nodes()))  # Default: return zero scores if unknown metric
     return (scores - np.min(scores)) / (np.max(scores) - np.min(scores))  # Normalize scores to [0, 1]
 
-def load_graph(file_path):
-    """Loads an unweighted graph from an edgelist file."""
-    return nx.read_edgelist(file_path, nodetype=str)
+def generate_random_graph(num_nodes=100, probability=0.05):
+    """Generates a random graph using the Erdős-Rényi model."""
+    return nx.erdos_renyi_graph(num_nodes, probability)
 
 def main():
-    file_path = "GAT/facebook_combined.txt"  # Update the path to the correct location
-    graph = load_graph(file_path)
-    print(f"Graph Loaded: {len(graph.nodes())} nodes, {len(graph.edges())} edges")
+    # Generate a random graph
+    graph = generate_random_graph()
+    print(f"Random Graph Generated: {len(graph.nodes())} nodes, {len(graph.edges())} edges")
 
-    # Compute criticality scores
-    criticality_scores = compute_criticality_scores(graph, metric='degree')
-    print("Criticality scores computed.")
+    # Compute ground truth criticality scores
+    ground_truth_scores = compute_criticality_scores(graph, metric='degree')
+    print("Ground truth criticality scores computed.")
 
     # Generate embeddings using GAT
-    node_embeddings = generate_gat_embeddings(graph, target_scores=criticality_scores)
+    node_embeddings = generate_gat_embeddings(graph, target_scores=ground_truth_scores)
     print("Node embeddings generated.")
 
-    # Combine training and testing data
-    nodes = list(graph.nodes())
-    indices = np.arange(len(nodes))
-    np.random.shuffle(indices)
+    # Load the trained ILGR model and scaler
+    ilgr = ILGR(input_dim=node_embeddings.shape[1])
+    ilgr.load_model("trained_ilgr_model_gat.h5", "scaler_gat.pkl")
 
-    # Use the entire dataset (train + test) for training (overfitting)
-    train_embeddings = node_embeddings[indices]
-    train_scores = criticality_scores[indices]
+    # Predict criticality scores using the trained model
+    predicted_scores = ilgr.predict(node_embeddings)
 
-    ilgr = ILGR(input_dim=train_embeddings.shape[1])
-    ilgr.build_model()
-    ilgr.train(train_embeddings, train_scores, epochs=300)
+    # Binarize the ground truth and predicted scores
+    threshold = 0.5  # You can adjust this threshold as needed
+    ground_truth_binary = (ground_truth_scores >= threshold).astype(int)
+    predicted_binary = (predicted_scores >= threshold).astype(int)
 
-    # Save the trained model and scaler
-    ilgr.save_model("trained_ilgr_model_gat.h5", "scaler_gat.pkl")
+    # Evaluate the results
+    accuracy = accuracy_score(ground_truth_binary, predicted_binary)
+    precision = precision_score(ground_truth_binary, predicted_binary, average='macro')
+    recall = recall_score(ground_truth_binary, predicted_binary, average='macro')
+    f1 = f1_score(ground_truth_binary, predicted_binary, average='macro')
 
-    # Evaluate on the same data (overfitting)
-    predicted_scores = ilgr.predict(train_embeddings)
-    metrics = ilgr.evaluate_rank_metrics(train_scores, predicted_scores, top_n_percent=0.05)
-    print("Evaluation Metrics:")
-    for metric_name, value in metrics.items():
-        print(f"{metric_name}: {value:.4f}")
+    print("\nEvaluation Metrics:")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1:.4f}")
 
 if __name__ == "__main__":
     main()
