@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, Model
 import logging
 import joblib  # Add this import
+from scipy import stats  # Add this import for ranking metrics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,6 +120,29 @@ class ILGR:
         print(f"Model loaded from {model_path}")
         print(f"Scaler loaded from {scaler_path}")
 
+    def evaluate_rank_metrics(self, y_true, y_pred, top_n_percent=0.05):
+        """Evaluates ranking metrics: Top-N% Accuracy, Spearman, and Kendall Tau."""
+        print("y_true Range:", np.min(y_true), "to", np.max(y_true))
+        print("y_pred Range:", np.min(y_pred), "to", np.max(y_pred))
+
+        # Top-N% Accuracy
+        true_ranking = np.argsort(y_true)
+        pred_ranking = np.argsort(y_pred)
+        top_n = int(len(y_true) * top_n_percent)
+        top_true = set(true_ranking[-top_n:])
+        top_pred = set(pred_ranking[-top_n:])
+        top_n_accuracy = len(top_true & top_pred) / len(top_true)
+
+        # Compute ranking correlations
+        spearman_corr = stats.spearmanr(y_true, y_pred)
+        kendall_corr = stats.kendalltau(y_true, y_pred)
+
+        return {
+            "Top-N% Accuracy": top_n_accuracy,
+            "Spearman Correlation": spearman_corr,
+            "Kendall Tau Correlation": kendall_corr,
+        }
+
 def compute_criticality_scores(graph, metric='degree'):
     """Compute criticality scores for nodes based on a simple metric."""
     if metric == 'degree':
@@ -133,7 +157,7 @@ def load_graph(file_path):
     return nx.read_edgelist(file_path, nodetype=str)
 
 def main():
-    file_path = "GAT/facebook_combined.txt"  # Update the path to the correct location
+    file_path = "facebook_combined.txt"  # Update the path to the correct location
     graph = load_graph(file_path)
     print(f"Graph Loaded: {len(graph.nodes())} nodes, {len(graph.edges())} edges")
 
