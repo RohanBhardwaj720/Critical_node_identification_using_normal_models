@@ -134,8 +134,8 @@ class ILGR:
         top_n_accuracy = len(top_true & top_pred) / len(top_true)
 
         # Compute ranking correlations
-        spearman_corr = stats.spearmanr(y_true, y_pred)
-        kendall_corr = stats.kendalltau(y_true, y_pred)
+        spearman_corr, spearman_p = stats.spearmanr(y_true, y_pred)
+        kendall_corr, kendall_p = stats.kendalltau(y_true, y_pred)
 
         return {
             "Top-N% Accuracy": top_n_accuracy,
@@ -190,6 +190,8 @@ def main():
     metrics = ilgr.evaluate_rank_metrics(train_scores, predicted_scores, top_n_percent=0.05)
     print("Evaluation Metrics:")
     for metric_name, value in metrics.items():
+        if isinstance(value, tuple):
+            value = value[0]  # Extract the correlation coefficient
         print(f"{metric_name}: {value:.4f}")
 
 if __name__ == "__main__":
